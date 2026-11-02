@@ -12,7 +12,9 @@ const anchor = resolve(process.env.DSH_TEST_ANCHOR);
 const packageRoot = resolve(process.argv[2] ?? fileURLToPath(new URL('../', import.meta.url)));
 const hostManifest = JSON.parse(readFileSync(anchor, 'utf8'));
 assert.equal(hostManifest.name, '@deepseek-ai/dsh', 'Anchor must point to the DSH CLI package.');
-assert.equal(hostManifest.version, '0.2.0-rc.2', 'This release is validated against DSH 0.2.0-rc.2.');
+const verifiedRuntimes = ['0.2.0-rc.2', '0.2.1-rc.5'];
+assert.ok(verifiedRuntimes.includes(hostManifest.version),
+  `This release is validated against ${verifiedRuntimes.join(' or ')}; got ${hostManifest.version}.`);
 const requireDsh = createRequire(anchor);
 const load = name => import(pathToFileURL(requireDsh.resolve(name)).href);
 const timeout = setTimeout(() => {
@@ -26,6 +28,44 @@ globalThis.fetch = async () => {
   networkAttempts += 1;
   throw new Error('Offline smoke test prohibits network requests');
 };
+
+function inspectLegacyMount(ctx, registry, lease) {
+  const mount = registry.livePresetMounts(ctx.fiber).find(row => row.key === lease.key);
+  assert.ok(mount, 'Missing real mounted preset tree');
+  const activeRows = [...mount.tree.entries()].filter(row => !row.disabled);
+  for (const row of activeRows) {
+    assert.ok(row.fiber, `${row.options.id} has no fiber`);
+    assert.equal(row.fiber.state, 2, `${row.options.id} is not ACTIVE`);
+  }
+  return {
+    ids: activeRows.map(row => row.options.id),
+    names: activeRows.map(row => row.options.name),
+    leaked: registry.leakedServices(ctx, mount.fiber),
+    remaining: () => registry.livePresetMounts(ctx.fiber)
+      .filter(row => row.presetId === 'ielts-writing-coach').length,
+  };
+}
+
+async function inspectInventoryMount(ctx) {
+  const inventory = await ctx.agentPresets.compositionInventory();
+  const coach = inventory.find(row => row.id === 'ielts-writing-coach');
+  assert.ok(coach, 'Missing composition inventory for ielts-writing-coach');
+  assert.equal(coach.broken, undefined, coach.broken);
+  const enabled = coach.rows.filter(row => row.enabled === true);
+  for (const row of enabled) {
+    assert.equal(row.fiberState, 2, `${row.entryId ?? row.moduleName} is not ACTIVE`);
+  }
+  const inspected = ctx.agentPresets.inspectCompositions()
+    .filter(row => row.id === 'ielts-writing-coach');
+  assert.ok(inspected.length > 0, 'Missing retained coach composition');
+  return {
+    ids: enabled.map(row => row.entryId),
+    names: enabled.map(row => row.moduleName),
+    leaked: inspected.flatMap(row => row.leakedServices),
+    remaining: () => ctx.agentPresets.inspectCompositions()
+      .filter(row => row.id === 'ielts-writing-coach').length,
+  };
+}
 
 let ctx;
 let lease;
@@ -99,16 +139,14 @@ try {
   assert.equal(assembly.sections.length, 1);
   assert.deepEqual(assembly.contexts, [], 'Persona did not suppress runtime context');
   assert.deepEqual(assembly.tools.map(tool => tool.name).sort(), ['web_fetch', 'web_search']);
-  const mount = registry.livePresetMounts(ctx.fiber).find(row => row.key === lease.key);
-  assert.ok(mount, 'Missing real mounted preset tree');
-  const activeRows = [...mount.tree.entries()].filter(row => !row.disabled);
-  for (const row of activeRows) {
-    assert.ok(row.fiber, `${row.options.id} has no fiber`);
-    assert.equal(row.fiber.state, 2, `${row.options.id} is not ACTIVE`);
-  }
-  assert.ok(activeRows.some(row => row.options.name === '@deepseek-ai/dsh-compaction-basic'));
-  assert.ok(activeRows.some(row => row.options.name === '@deepseek-ai/dsh-command-compact'));
-  assert.deepEqual(registry.leakedServices(ctx, mount.fiber), []);
+  // 0.2.1-rc.5 removed the module-level livePresetMounts export. The preset
+  // bundle is unchanged; only the test's inspection handle differs.
+  const activeRows = typeof registry.livePresetMounts === 'function'
+    ? inspectLegacyMount(ctx, registry, lease)
+    : await inspectInventoryMount(ctx);
+  assert.ok(activeRows.names.includes('@deepseek-ai/dsh-compaction-basic'));
+  assert.ok(activeRows.names.includes('@deepseek-ai/dsh-command-compact'));
+  assert.deepEqual(activeRows.leaked, []);
   assert.equal(ctx.get('compaction'), undefined, 'Compaction escaped its isolate realm');
   assert.equal(networkAttempts, 0);
 
@@ -118,16 +156,20 @@ try {
   ctx.loader.remove(declaration.id);
   await declarationFiber.dispose();
   assert.deepEqual((await ctx.agentPresets.list()).map(row => row.id), ['standard']);
-  assert.equal(registry.livePresetMounts(ctx.fiber).filter(row =>
-    row.presetId === 'ielts-writing-coach').length, 0);
+  assert.equal(activeRows.remaining(), 0);
   assert.deepEqual(await ctx.systemPrompt.assemble(), globalBefore);
   assert.equal(scope.scopeOf(ctx), undefined);
   await baselineDisposer();
   assert.deepEqual(await ctx.agentPresets.list(), []);
+  const pluginManifest = JSON.parse(readFileSync(resolve(packageRoot, 'package.json'), 'utf8'));
+  assert.equal(appBoot.evaluatePluginCompatibility(pluginManifest, {}, hostManifest.version), undefined,
+    `Verified runtime ${hostManifest.version} was rejected by its own compatibility check`);
+  assert.ok(appBoot.evaluatePluginCompatibility(pluginManifest, {}, '0.2.1-rc.4'),
+    'An unverified DSH runtime must remain incompatible');
   const manifest = JSON.parse(readFileSync(anchor, 'utf8'));
   console.log(JSON.stringify({ status: 'PASS', runtimeVersion: manifest.version,
     packageRoot, nativeModuleLoader: true, promptCharacters: expectedPrompt.length,
-    activePresetRows: activeRows.map(row => row.options.id),
+    activePresetRows: activeRows.ids,
     tools: assembly.tools.map(tool => tool.name).sort(),
     networkAttempts, mocks: [],
     verified: ['native patch loading', 'full preset activation diagnostic',

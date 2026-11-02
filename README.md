@@ -13,15 +13,23 @@
 
 ## 安装
 
-首版 **v0.1.0** 验证环境为 **DSH 0.2.0-rc.2、Node.js 22.22+**。包内明确限定该 DSH 版本；其他版本尚未验收，不建议绕过兼容检查。先执行 `dsh --version` 确认。
+当前 **v0.1.1** 已在 **DSH 0.2.0-rc.2** 与 **DSH 0.2.1-rc.5**、Node.js 22.22+ 上通过原生宿主检查。包内 `engines.dsh` 与 DSH peer 都只接受这两个已验证版本；其他版本尚未验收，不建议绕过兼容检查。先执行 `dsh --version` 确认。
 
-使用 DSH Web 的终端执行：
+DSH 0.2.1-rc.5 只按 `engines.dsh` 决定兼容性，并忽略 peer；0.2.0-rc.2 只检查 peer。两个字段写成同一个范围，因此任一安装器都只放行已验证版本。v0.1.0 仍钉在 0.2.0-rc.2，不要用它安装 0.2.1-rc.5。
+
+Web profile：
 
 ```bash
-dsh plugin --profile web add "https://github.com/7827666/dsh-ielts-writing-coach/releases/download/v0.1.0/dsh-ielts-writing-coach-0.1.0.tgz"
+dsh plugin --profile web add "https://github.com/7827666/dsh-ielts-writing-coach/releases/download/v0.1.1/dsh-ielts-writing-coach-0.1.1.tgz"
 ```
 
-使用其他已有 profile 时，把 `web` 换成实际名称；Desktop 用户使用其插件安装入口，并核对应用自带的 DSH 版本。安装前保存当前任务，按 DSH 的提示关闭／重启使用同一 profile 的服务。无需本项目构建脚本或额外 API key。
+Desktop profile：
+
+```bash
+dsh plugin --profile desktop add "https://github.com/7827666/dsh-ielts-writing-coach/releases/download/v0.1.1/dsh-ielts-writing-coach-0.1.1.tgz"
+```
+
+使用其他已有 profile 时，把 profile 名换成实际名称。安装前保存当前任务，按 DSH 的提示关闭／重启使用同一 profile 的服务。无需本项目构建脚本或额外 API key。
 
 安装后新建会话，在 Agent 预设中选择 **「雅思写作教练」**，再选择自己已配置的模型。插件新增独立预设，不自动切换默认预设或默认模型。旧会话仍沿用创建时的预设，请用新会话测试。
 
@@ -31,7 +39,7 @@ dsh plugin --profile web add "https://github.com/7827666/dsh-ielts-writing-coach
 请按这个仓库的 README 安装 DSH 雅思写作教练插件：
 https://github.com/7827666/dsh-ielts-writing-coach
 
-先核对 DSH 版本与我实际使用的 profile。只安装已验证兼容的 Release；不绕过版本检查，不为安装这个插件擅自升级或降级 DSH。
+先核对 DSH 版本与我实际使用的 profile。当前已验证兼容的 Release 是 v0.1.1，对应 DSH 0.2.0-rc.2 与 0.2.1-rc.5；Desktop 使用 profile desktop。只安装这个已验证 Release，不绕过版本检查，不为安装这个插件擅自升级或降级 DSH。不要安装只兼容 0.2.0-rc.2 的 v0.1.0。
 保留现有配置、默认预设、模型和凭据；修改前备份涉及的配置，避免中断正在运行的任务。
 安装后检查新会话能选择“雅思写作教练”，并说明选用的模型是否支持图片。
 使用自编短文确认先评分与分析；发送“开始修改”后才改全文。不要上传私人作文作为公开测试资料。
@@ -98,7 +106,7 @@ npm run check
 
 构建生成独立提示词及 `cordis.patch.yml`。`--check` 检查二者是否仍与源文件一致；修改后别忘记提交生成文件。
 
-真实宿主验收需要已安装的 DSH **0.2.0-rc.2**。将 `DSH_TEST_ANCHOR` 指向该安装的 `@deepseek-ai/dsh/package.json`，然后执行 `npm run test:host`。例如标准 npm 全局安装时：
+真实宿主验收需要已安装的 DSH **0.2.0-rc.2** 或 **0.2.1-rc.5**。将 `DSH_TEST_ANCHOR` 指向该安装的 `@deepseek-ai/dsh/package.json`，然后执行 `npm run test:host`。例如标准 npm 全局安装时：
 
 ```bash
 DSH_TEST_ANCHOR="$(npm root -g)/@deepseek-ai/dsh/package.json" npm run test:host
